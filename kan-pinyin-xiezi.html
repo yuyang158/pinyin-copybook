@@ -282,6 +282,7 @@
       position: absolute;
       background: var(--grid);
       pointer-events: none;
+      z-index: 0;
     }
 
     .write-box.tianzi::before,
@@ -324,13 +325,21 @@
     .answer-char {
       position: absolute;
       inset: 0;
+      z-index: 1;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-family: "KaiTi", "STKaiti", "SimKai", serif;
+      font-family: "KaiTi", "STKaiti", "SimKai", "PingFang SC", "Microsoft YaHei", sans-serif;
       font-size: calc(var(--cell-size, 56px) * 0.72);
-      color: #bbb;
+      color: #777;
       pointer-events: none;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    .answer-sheet {
+      page-break-before: always;
+      break-before: page;
     }
 
     .answer-sheet .write-box {
@@ -377,6 +386,17 @@
       .sheet:last-child {
         page-break-after: auto;
         break-after: auto;
+      }
+
+      .answer-char {
+        color: #666 !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+
+      .answer-sheet {
+        page-break-before: always;
+        break-before: page;
       }
 
       .word-group,
@@ -480,6 +500,16 @@
       const errorBox = document.getElementById("errorBox");
       const worksheetEl = document.getElementById("worksheet");
       const wordCountEl = document.getElementById("wordCount");
+      let hasGenerated = false;
+
+      const optionEls = [
+        cellSizeEl,
+        gridTypeEl,
+        toneTypeEl,
+        showMetaEl,
+        groupWordsEl,
+        includeAnswerEl,
+      ];
 
       function showError(msg) {
         errorBox.textContent = msg;
@@ -546,7 +576,7 @@
 
       function renderCharCell(char, py, gridClass, showAnswer) {
         const answerHtml = showAnswer
-          ? `<span class="answer-char">${char}</span>`
+          ? `<span class="answer-char">${escapeHtml(char)}</span>`
           : "";
         return `
           <div class="char-cell">
@@ -673,11 +703,20 @@
         );
         const chapterCount = chapters.filter((ch) => ch.chapterTitle).length;
         const chapterText = chapterCount ? `，${chapterCount} 章` : "";
-        wordCountEl.textContent = `${wordCount} 个词语，共 ${charCount} 个字${chapterText}`;
+        const answerText = includeAnswer ? "，含答案页" : "";
+        wordCountEl.textContent = `${wordCount} 个词语，共 ${charCount} 个字${chapterText}${answerText}`;
+        hasGenerated = true;
+      }
+
+      function maybeRegenerate() {
+        if (hasGenerated && vocabEl.value.trim()) {
+          generate();
+        }
       }
 
       generateBtn.addEventListener("click", generate);
       printBtn.addEventListener("click", () => window.print());
+      optionEls.forEach((el) => el.addEventListener("change", maybeRegenerate));
       sampleBtn.addEventListener("click", () => {
         vocabEl.value = "你好 学校\n-----\n中国 美丽 快乐\n-----\n春天 学习 朋友";
         generate();
