@@ -221,6 +221,19 @@
       margin-right: 8px;
     }
 
+    .chapter-block + .chapter-block {
+      margin-top: 22px;
+      padding-top: 18px;
+      border-top: 1px dashed #bbb;
+    }
+
+    .chapter-title {
+      margin: 0 0 12px;
+      font-size: 1.1rem;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+    }
+
     .word-grid {
       display: flex;
       flex-wrap: wrap;
@@ -384,8 +397,8 @@
     <section class="panel no-print">
       <h2>词汇输入</h2>
       <label for="vocab">用空格、英文逗号或中文逗号分隔多个词语</label>
-      <textarea id="vocab" placeholder="例如：你好 学校 中国 美丽 快乐"></textarea>
-      <p class="hint">支持整句粘贴，会自动按标点拆分；仅保留汉字词语。</p>
+      <textarea id="vocab" placeholder="例如：&#10;你好 学校&#10;-----&#10;中国 美丽&#10;-----&#10;快乐 春天"></textarea>
+      <p class="hint">词语用空格或逗号分隔；单独一行输入至少 5 个连字符（如 -----）可划分章节，每章自动加标题「第N章」。</p>
 
       <div class="row">
         <div>
@@ -473,12 +486,37 @@
         errorBox.style.display = msg ? "block" : "none";
       }
 
+      const CHAPTER_SEPARATOR = /(?:^|\n)\s*-{5,}\s*(?:\n|$)/;
+
       function parseVocabulary(text) {
         return text
           .replace(/[，、；;。！？!?：:\n\r\t]+/g, " ")
           .split(/[\s,]+/)
           .map((s) => s.replace(/[^\u4e00-\u9fff]/g, ""))
           .filter(Boolean);
+      }
+
+      function parseChapters(text) {
+        const trimmed = text.trim();
+        if (!trimmed) return [];
+
+        const hasSeparator = CHAPTER_SEPARATOR.test(trimmed);
+        const parts = trimmed
+          .split(CHAPTER_SEPARATOR)
+          .map((part) => part.trim())
+          .filter(Boolean);
+
+        if (!hasSeparator) {
+          const words = parseVocabulary(trimmed);
+          return words.length ? [{ chapterTitle: null, words }] : [];
+        }
+
+        return parts
+          .map((part, index) => ({
+            chapterTitle: `第${index + 1}章`,
+            words: parseVocabulary(part),
+          }))
+          .filter((chapter) => chapter.words.length > 0);
       }
 
       function getPinyinArray(word) {
@@ -527,20 +565,44 @@
         return `<div class="word-group">${cells}</div>`;
       }
 
-      function renderSheet(title, words, options) {
-        const { showMeta, groupWords, gridClass, showAnswer, sheetClass } = options;
-        const wordHtml = words
+      function renderWordsHtml(words, groupWords, gridClass, showAnswer) {
+        return words
           .map((word) => {
             if (groupWords) {
               return renderWordGroup(word, gridClass, showAnswer);
             }
+            const pys = getPinyinArray(word);
             return [...word]
-              .map((ch, i) => {
-                const pys = getPinyinArray(word);
-                return renderCharCell(ch, pys[i] || "", gridClass, showAnswer);
-              })
+              .map((ch, i) => renderCharCell(ch, pys[i] || "", gridClass, showAnswer))
               .join("");
           })
+          .join("");
+      }
+
+      function renderChapterBlock(chapterTitle, words, groupWords, gridClass, showAnswer) {
+        const titleHtml = chapterTitle
+          ? `<h4 class="chapter-title">${escapeHtml(chapterTitle)}</h4>`
+          : "";
+        return `
+          <div class="chapter-block">
+            ${titleHtml}
+            <div class="word-grid">${renderWordsHtml(words, groupWords, gridClass, showAnswer)}</div>
+          </div>
+        `;
+      }
+
+      function renderSheet(title, chapters, options) {
+        const { showMeta, groupWords, gridClass, showAnswer, sheetClass } = options;
+        const chapterHtml = chapters
+          .map((chapter) =>
+            renderChapterBlock(
+              chapter.chapterTitle,
+              chapter.words,
+              groupWords,
+              gridClass,
+              showAnswer
+            )
+          )
           .join("");
 
         return `
@@ -549,7 +611,7 @@
               <h3 class="sheet-title">${escapeHtml(title)}</h3>
               ${renderMeta(showMeta)}
             </div>
-            <div class="word-grid">${wordHtml}</div>
+            ${chapterHtml}
           </section>
         `;
       }
@@ -564,9 +626,9 @@
 
       function generate() {
         showError("");
-        const words = parseVocabulary(vocabEl.value.trim());
+        const chapters = parseChapters(vocabEl.value);
 
-        if (!words.length) {
+        if (!chapters.length) {
           showError("请输入至少一个中文词语。");
           worksheetEl.innerHTML = '<div class="empty-state">请输入词汇后重新生成</div>';
           printBtn.disabled = true;
@@ -584,7 +646,7 @@
         worksheetEl.style.setProperty("--cell-size", cellSize + "px");
         worksheetEl.style.setProperty("--pinyin-size", Math.round(cellSize * 0.23) + "px");
 
-        let html = renderSheet(title, words, {
+        let html = renderSheet(title, chapters, {
           showMeta,
           groupWords,
           gridClass,
@@ -592,7 +654,7 @@
         });
 
         if (includeAnswer) {
-          html += renderSheet(title + "（答案）", words, {
+          html += renderSheet(title + "（答案）", chapters, {
             showMeta: false,
             groupWords,
             gridClass,
@@ -604,14 +666,20 @@
         worksheetEl.innerHTML = html;
         printBtn.disabled = false;
 
-        const charCount = words.reduce((n, w) => n + [...w].length, 0);
-        wordCountEl.textContent = `${words.length} 个词语，共 ${charCount} 个字`;
+        const wordCount = chapters.reduce((n, ch) => n + ch.words.length, 0);
+        const charCount = chapters.reduce(
+          (n, ch) => n + ch.words.reduce((sum, w) => sum + [...w].length, 0),
+          0
+        );
+        const chapterCount = chapters.filter((ch) => ch.chapterTitle).length;
+        const chapterText = chapterCount ? `，${chapterCount} 章` : "";
+        wordCountEl.textContent = `${wordCount} 个词语，共 ${charCount} 个字${chapterText}`;
       }
 
       generateBtn.addEventListener("click", generate);
       printBtn.addEventListener("click", () => window.print());
       sampleBtn.addEventListener("click", () => {
-        vocabEl.value = "你好 学校 中国 美丽 快乐 春天 学习 朋友";
+        vocabEl.value = "你好 学校\n-----\n中国 美丽 快乐\n-----\n春天 学习 朋友";
         generate();
       });
 
